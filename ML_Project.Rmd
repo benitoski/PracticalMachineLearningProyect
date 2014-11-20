@@ -1,0 +1,184 @@
+---
+title: "Coursera's Machine Learning Project"
+author: "Oscar Benitez"
+date: "Thursday, November 20, 2014"
+output: html_document
+---
+#Synopsis
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). 
+
+The goal of this project is to predict the manner of performing unilateral dumbbell biceps curls based on data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. The 5 possible methods include -  
+
+
+1. exactly according to the specification  
+2. throwing the elbows to the front  
+3. lifting the dumbbell only halfway  
+4. lowering the dumbbell only halfway   
+5. throwing the hips to the front  
+
+#A.Loading, exploring, cleaning and preprocessing data
+
+The following steps were taken to adquire, explore, clean and preprocess both training and test data set  
+
+##A1.1 Set the environment and load the data 
+```{r loadData, echo=TRUE}
+
+library(ggplot2)
+library(caret)
+
+##setwd("C:/Users/Benitoski/Google Drive/E-learning/DataScienceSpecialization/08_PracticalMachineLearning/Project")
+train0 <- read.csv("./pml-training.csv", header=TRUE, as.is = TRUE, stringsAsFactors = FALSE, sep=',', na.strings=c('NA','','#DIV/0!'))
+test0<- read.csv("./pml-testing.csv", header=TRUE, as.is = TRUE, stringsAsFactors = FALSE, sep=',', na.strings=c('NA','','#DIV/0!'))
+
+```
+The size of the training set is _`r dim(train0)`_  (rows by columns) and the size of the test set is _`r dim(test0)`_  (rows by columns)   
+
+##A1.2 Exploring the training set
+The target is a factor variable with the following distribution  
+
+```{r EDA0, echo=TRUE}
+ggplot(data=train0, aes(x=classe, fill=classe)) + geom_bar() + guides(fill=FALSE)
+
+```
+
+A quick look on the predictor variables in the data set shows that only a bunch of them has no NA values. See _Appendix - EDA training and testing data set_ for more detail.  
+
+##A1.3 Cleaning the training and testing data set
+The following procedure was used to clean the training set keeping only the completed variables
+
+```{r Clean0, echo=TRUE}
+NA_Col <- colSums(is.na(train0))
+FlagCol <- NA_Col == 0
+train1 <- train0[FlagCol]
+```
+
+The same set of variables was selected on the test data  
+
+```{r Clean1, echo=TRUE}
+test1 <- test0[FlagCol]
+```
+
+##A1.4 Preprocessing the training and testing data set
+
+In order to avoid model artifacs due to scale differences between the variables a z transformation was performed both on training and testing data set  
+
+```{r Prepr0, echo=TRUE}
+NumVars <- which(lapply(train1, class) %in% "numeric")
+
+preObj <-preProcess(train1[,NumVars],method=c('knnImpute', 'center', 'scale'))
+train2 <- predict(preObj, train1[,NumVars])
+train2$classe <- train1$classe
+
+test2 <- predict(preObj, test1[,NumVars])
+```
+
+###A1.4.1 Deleting near zero variables
+
+The variables with near zero variation has no much prediction power, the following code identified if there are such a variables and exclude them from the analysis in case they exist  
+
+```{r nzv0, echo=TRUE}
+nzv1 <- nearZeroVar(train2,saveMetrics=TRUE)
+train3 <- train2[,nzv1$nzv==FALSE]
+
+nzv2<-nzv1[-28,]
+test3 <- test2[,nzv2$nzv==FALSE]
+```
+
+#B. Modeling
+
+The model building stage has three steps: _sampling traning - testing data set_ from the cleaning training set obtained so far, _build a model_ with the new trainin data set and _test for accurracy and over - fitting_ by using the new testing data set.  
+
+##B.1 New training and testing samples 
+
+The original clean training set was splitted in nwe training -testing data set (60 - 40 %, respectively) with the following code  
+
+```{r sample0, echo=TRUE}
+set.seed=123567
+partition <- createDataPartition(y = train3$classe, p = 0.6, list = FALSE)
+trainingData <- train3[partition, ]
+testData <- train3[-partition, ]
+
+```
+
+##B.2 Model Building
+
+The choosing model algorithm was Random Forests  
+
+"Random forests are an ensemble learning method for classification (and regression) that operate by constructing a multitude of decision trees at training time and outputting the class that is the mode of the classes output by individual trees. The algorithm for inducing a random forest was developed by Leo Breiman and Adele Cutler"... source: [Wikipedia](http://en.wikipedia.org/wiki/Random_forest)  
+
+The main features of the Random Forest algorhitm are:  
+1.It is unexcelled in accuracy among current algorithms.  
+2.It runs efficiently on large data bases.  
+3.It can handle thousands of input variables without variable deletion.  
+4.It gives estimates of what variables are important in the classification.  
+5.It generates an internal unbiased estimate of the generalization error as the forest building progresses.  
+6.It has an effective method for estimating missing data and maintains accuracy when a large proportion of the data are missing.  
+7.It has methods for balancing error in class population unbalanced data sets.
+8.Generated forests can be saved for future use on other data.  
+9.Prototypes are computed that give information about the relation between the variables and the classification.  
+10.It computes proximities between pairs of cases that can be used in clustering, locating outliers, or (by scaling) give interesting views of the data.  
+11.The capabilities of the above can be extended to unlabeled data, leading to unsupervised clustering, data views and outlier detection.  
+12.It offers an experimental method for detecting variable interactions.  
+
+source: [Berkeley University](https://www.stat.berkeley.edu/~breiman/RandomForests/cc_home.htm)  
+
+The following code was usd to buil the Random Forests model
+```{r model0, echo=TRUE}
+model <- train(as.factor(trainingData$classe) ~ ., data = trainingData, method = "rf", prox = TRUE, 
+               trControl = trainControl(method = "cv", number = 4, allowParallel = TRUE))
+
+model
+```
+
+##B3.Testing accurracy and over-fitting
+Acurracy on the new trainig data:  
+```{r Acc0, echo=TRUE}
+trainingPred <- predict(model, trainingData)
+confusionMatrix(trainingPred, trainingData$classe)
+```
+The model performs perfectly on the new training data, but it seems that the figures are over-fitting
+To get an acurracy more real the model was applied to the new testing data:  
+
+```{r Acc1, echo=TRUE}
+testingPred <- predict(model, testData)
+confusionMatrix(testingPred, testData$classe)
+```
+
+#C. Predictions
+
+Applying the model on the real testing set the results are:  
+```{r Acc2, echo=TRUE}
+answer <- predict(model, test3)
+answer <- as.character(answer)
+answer
+```
+Those results were written to 20 separate files, as instructed wth the following code:  
+
+pml_write_files = function(x){  
+  n = length(x)  
+  for(i in 1:n){  
+    filename = paste0("problem_id_",i,".txt")  
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)  
+  }  
+}  
+
+pml_write_files(answer)  
+
+After submit all the answers the score obtained was 20/20  
+
+#Conclusion
+
+The combination of selecting completed variables, applying z transformation on the predictors and random forest modeling, produced a high acurracy, low over-fitted model for this particular data set.
+
+------
+
+##Apendix  
+###EDA Training data set  
+```{r EDAt1, echo=TRUE}
+summary(train0)
+```
+###EDA Testing data set  
+```{r EDAt2, echo=TRUE}
+summary(test0)
+```
+
